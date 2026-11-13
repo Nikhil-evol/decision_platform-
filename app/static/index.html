@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScoreMe | Configurable Workflow Decision Studio</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-badge">SM</div>
+      <div>
+        <h1>ScoreMe Decision Studio</h1>
+        <p>Configurable Workflow &amp; Rule Decision Platform</p>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span id="healthPill" class="pill pill-neutral">Checking Engine...</span>
+      <a href="/docs" target="_blank" class="btn btn-ghost">OpenAPI / Swagger ↗</a>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="runner">1. Decision Playground &amp; Audit Trace</button>
+    <button class="tab" data-tab="config">2. Live Rule &amp; Workflow Config Editor</button>
+    <button class="tab" data-tab="resilience">3. External Dependencies &amp; Fault Injection</button>
+    <button class="tab" data-tab="ledger">4. Execution Audit Ledger</button>
+  </nav>
+
+  <main class="container">
+    <!-- TAB 1: DECISION PLAYGROUND -->
+    <section id="tab-runner" class="tab-panel active">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h2>Submit Workflow Request</h2>
+            <span id="activeConfigHash" class="mono-badge">hash: —</span>
+          </div>
+
+          <label class="field-label" for="workflowSelect">Target Business Workflow</label>
+          <select id="workflowSelect" class="input"></select>
+          <p id="workflowDesc" class="muted-text"></p>
+
+          <div class="preset-bar">
+            <span class="preset-label">Quick Evaluation Scenarios:</span>
+            <div class="preset-buttons">
+              <button type="button" class="btn btn-chip" data-preset="approve">✓ STP Auto-Approve</button>
+              <button type="button" class="btn btn-chip" data-preset="review">⚠ Borderline Manual Review</button>
+              <button type="button" class="btn btn-chip" data-preset="reject">✕ Compliance Reject</button>
+              <button type="button" class="btn btn-chip" data-preset="invalid">! Invalid Schema</button>
+            </div>
+          </div>
+
+          <div class="row-2">
+            <div>
+              <label class="field-label" for="idempotencyKeyInput">Idempotency-Key Header</label>
+              <div class="input-with-btn">
+                <input id="idempotencyKeyInput" type="text" class="input mono" />
+                <button type="button" id="regenKeyBtn" class="btn btn-secondary" title="Generate fresh key">New Key</button>
+              </div>
+            </div>
+            <div class="checkbox-box">
+              <label class="checkbox-label">
+                <input type="checkbox" id="simulateStorageFail" />
+                <span>Simulate Mid-Commit DB Crash (Tests Atomic Rollback)</span>
+              </label>
+            </div>
+          </div>
+
+          <label class="field-label" for="payloadEditor">Request Payload (JSON)</label>
+          <textarea id="payloadEditor" class="code-editor" rows="12" spellcheck="false"></textarea>
+
+          <div class="action-row">
+            <button type="button" id="submitDecisionBtn" class="btn btn-primary">Evaluate Decision</button>
+            <button type="button" id="replayDuplicateBtn" class="btn btn-secondary">Replay Duplicate (Same Key)</button>
+          </div>
+          <div id="requestAlert" class="alert hidden"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Decision Output &amp; Explainability Trace</h2>
+            <div id="replayBadge" class="pill pill-info hidden">IDEMPOTENT REPLAY</div>
+          </div>
+
+          <div id="emptyResult" class="empty-state">
+            <p>Select a scenario preset or edit the JSON payload, then click <strong>Evaluate Decision</strong> to inspect the state machine path, external enrichment, and rule-by-rule audit trail.</p>
+          </div>
+
+          <div id="resultContainer" class="hidden">
+            <div id="decisionBanner" class="decision-banner">
+              <div>
+                <div class="banner-eyebrow">FINAL OUTCOME</div>
+                <div id="resultStatus" class="banner-status">APPROVED</div>
+              </div>
+              <div class="banner-meta">
+                <div><strong>Execution ID:</strong> <span id="resultExecId" class="mono"></span></div>
+                <div><strong>Workflow:</strong> <span id="resultWfVersion" class="mono"></span></div>
+                <div><strong>Retry Count:</strong> <span id="resultRetries" class="mono"></span></div>
+              </div>
+            </div>
+
+            <p id="resultSummary" class="summary-box"></p>
+
+            <div id="retryActionBox" class="retry-callout hidden">
+              <span>Execution is paused in <strong>RETRY_PENDING</strong> due to an upstream dependency failure.</span>
+              <button type="button" id="retryPendingBtn" class="btn btn-warning">Reset Faults &amp; Retry Now</button>
+            </div>
+
+            <h3>Lifecycle State Machine Transitions</h3>
+            <div id="stateTimeline" class="timeline"></div>
+
+            <h3>External Analyzer Enrichment</h3>
+            <pre id="enrichedBox" class="json-box">{}</pre>
+
+            <h3>Rule Evaluation Audit Trail</h3>
+            <div id="auditList" class="audit-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: LIVE CONFIG EDITOR -->
+    <section id="tab-config" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2>Declarative Workflow &amp; Rule Editor (Zero Code Rewrites)</h2>
+            <p class="muted-text">Modify thresholds, mandatory checks, or branching directives in YAML. Saving updates the SHA-256 config hash immediately while preserving historical execution audit hashes.</p>
+          </div>
+          <div class="action-row">
+            <select id="configWorkflowSelect" class="input"></select>
+            <button type="button" id="saveYamlBtn" class="btn btn-primary">Save &amp; Hot-Reload YAML</button>
+          </div>
+        </div>
+        <div id="configAlert" class="alert hidden"></div>
+        <textarea id="yamlEditor" class="code-editor tall" rows="24" spellcheck="false"></textarea>
+      </div>
+    </section>
+
+    <!-- TAB 3: RESILIENCE & FAULT INJECTION -->
+    <section id="tab-resilience" class="tab-panel">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Simulate Upstream Analyzer Failure</h2>
+          <p class="muted-text">Inject transient or permanent errors into external dependencies to verify exponential-backoff retries, <code>RETRY_PENDING</code> checkpointing, and recovery.</p>
+
+          <label class="field-label" for="faultServiceSelect">External Dependency Service</label>
+          <select id="faultServiceSelect" class="input">
+            <option value="bureau_bsa_aggregator">bureau_bsa_aggregator (CIBIL + Bank Statement Analyzer)</option>
+            <option value="gstn_analyzer">gstn_analyzer (GSTN Registry &amp; Return Check)</option>
+            <option value="ckyc_registry">ckyc_registry (CKYC &amp; PAN Registry)</option>
+          </select>
+
+          <label class="field-label" for="failTimesInput">Number of Consecutive Failures to Inject</label>
+          <input id="failTimesInput" type="number" class="input" value="5" min="0" max="20" />
+          <p class="muted-text">Tip: Workflow <code>max_retries</code> is 2 (3 total attempts). Setting <code>fail_times = 2</code> recovers inline; setting <code>fail_times = 5</code> halts in <code>RETRY_PENDING</code>.</p>
+
+          <label class="checkbox-label" style="margin: 12px 0;">
+            <input type="checkbox" id="permanentFailCheck" />
+            <span>Permanent Outage (Non-transient error)</span>
+          </label>
+
+          <div class="action-row">
+            <button type="button" id="applyFaultBtn" class="btn btn-warning">Inject Failure Mode</button>
+            <button type="button" id="resetFaultsBtn" class="btn btn-secondary">Reset All Services</button>
+          </div>
+          <div id="faultAlert" class="alert hidden"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Live External Service Telemetry</h2>
+            <button type="button" id="refreshTelemetryBtn" class="btn btn-secondary">Refresh</button>
+          </div>
+          <div id="telemetryGrid" class="telemetry-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: EXECUTION AUDIT LEDGER -->
+    <section id="tab-ledger" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2>Persisted Execution &amp; Audit Ledger (SQLite WAL)</h2>
+            <p class="muted-text">Click any execution row to load its complete decision trace in the Playground Inspector.</p>
+          </div>
+          <button type="button" id="refreshLedgerBtn" class="btn btn-secondary">Refresh Ledger</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Execution ID</th>
+                <th>Workflow</th>
+                <th>Config Hash</th>
+                <th>Idempotency Key</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Updated (UTC)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="ledgerBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

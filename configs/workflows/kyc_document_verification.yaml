@@ -1,0 +1,62 @@
+workflow_id: kyc_document_verification
+version: "1.0.0"
+name: Digital Borrower CKYC & Document Verification
+description: Validates PAN format and CKYC name match score before clearing borrower onboarding.
+default_outcome: APPROVED
+
+input_schema:
+  full_name:
+    type: string
+    required: true
+  pan_number:
+    type: string
+    required: true
+  document_tamper_score:
+    type: float
+    required: true
+    min_value: 0
+    max_value: 100
+
+steps:
+  - id: document_integrity_gate
+    name: FCU Document Tamper Screening
+    step_type: rule_group
+    rules:
+      - id: tamper_score_guard
+        name: Document Forgery / Tamper Guard
+        category: mandatory
+        expression: "document_tamper_score < 30"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "FCU check detected potential PDF/scan manipulation (tamper score >= 30)."
+
+  - id: ckyc_lookup_step
+    name: External CKYC & PAN Registry Lookup
+    step_type: external_check
+    external_check:
+      id: verify_pan_ckyc
+      service: ckyc_registry
+      input_fields: ["pan_number", "full_name"]
+      max_retries: 1
+      retry_backoff_ms: 20
+      on_failure: MANUAL_REVIEW
+
+  - id: identity_match_rules
+    name: PAN Validity & Fuzzy Name Match Threshold
+    step_type: rule_group
+    rules:
+      - id: pan_active_check
+        name: Valid PAN Structure & Registry Check
+        category: mandatory
+        expression: "ckyc_pan_valid == True"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "PAN number failed format or registry verification."
+
+      - id: name_match_branch
+        name: CKYC Name Match Confidence Threshold
+        category: branch
+        expression: "ckyc_name_match_score >= 85"
+        on_pass: APPROVE
+        on_fail: MANUAL_REVIEW
+        fail_reason: "CKYC name match score below 85%; routed to operations team for manual OVD check."

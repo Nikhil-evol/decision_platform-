@@ -1,0 +1,114 @@
+workflow_id: msme_credit_underwriting
+version: "1.2.0"
+name: MSME & Retail Credit Underwriting (BSA + Bureau)
+description: Evaluates borrower KYC, enriches CIBIL & Bank Statement Analyzer (BSA) cash-flow metrics, and routes to STP Auto-Approve, Credit Underwriter Review, or Reject.
+default_outcome: APPROVED
+
+input_schema:
+  applicant_name:
+    type: string
+    required: true
+  age:
+    type: int
+    required: true
+    min_value: 21
+    max_value: 75
+  monthly_net_inflow:
+    type: float
+    required: true
+    min_value: 10000
+  existing_monthly_emi:
+    type: float
+    required: true
+    min_value: 0
+  proposed_emi:
+    type: float
+    required: true
+    min_value: 500
+  loan_amount:
+    type: float
+    required: true
+    min_value: 10000
+  kyc_verified:
+    type: bool
+    required: true
+  borrower_segment:
+    type: string
+    required: true
+    allowed_values: ["salaried", "msme_proprietor", "self_employed_prof", "unemployed"]
+
+steps:
+  - id: intake_eligibility_gate
+    name: Mandatory KYC & Borrower Segment Gate
+    step_type: rule_group
+    rules:
+      - id: kyc_mandatory_check
+        name: CKYC / Video-KYC Verification Gate
+        category: mandatory
+        expression: "kyc_verified == True"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "Borrower CKYC/Video-KYC verification is incomplete."
+        pass_reason: "Borrower KYC verified."
+
+      - id: active_income_segment
+        name: Eligible Income Segment Check
+        category: mandatory
+        expression: "borrower_segment in ['salaried', 'msme_proprietor', 'self_employed_prof']"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "Applicant borrower segment is ineligible for automated credit underwriting."
+
+  - id: bureau_and_bsa_enrichment
+    name: External Bureau & Bank Statement Analyzer (BSA)
+    step_type: external_check
+    external_check:
+      id: fetch_bureau_bsa_signals
+      service: bureau_bsa_aggregator
+      input_fields:
+        - monthly_net_inflow
+        - existing_monthly_emi
+        - proposed_emi
+        - cibil_score
+        - inward_bounces_6m
+        - has_written_off_account
+      max_retries: 2
+      retry_backoff_ms: 25
+      on_failure: RETRY_PENDING
+
+  - id: credit_policy_evaluation
+    name: CIBIL, Bounce & Cash-Flow FOIR Policy Rules
+    step_type: rule_group
+    rules:
+      - id: writeoff_compliance_guard
+        name: Active Write-Off / Suit-Filed Guard
+        category: compliance
+        expression: "bureau_default_flag == False"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "Bureau report indicates an active loan write-off or default."
+
+      - id: minimum_cibil_floor
+        name: Minimum CIBIL Score Floor (>= 650)
+        category: threshold
+        expression: "bureau_cibil_score >= 650"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "CIBIL score fell below policy floor of 650."
+
+      - id: cheque_bounce_guard
+        name: 6-Month Inward Cheque/NACH Bounce Check
+        category: compliance
+        expression: "bsa_inward_bounces_6m <= 2"
+        on_pass: NEXT
+        on_fail: MANUAL_REVIEW
+        fail_reason: "More than 2 inward NACH/cheque bounces observed in 6-month bank statement."
+
+      - id: stp_auto_approval_branch
+        name: Straight-Through Processing (STP) Auto-Approve Branch
+        category: branch
+        expression: "bureau_cibil_score >= 720 and bsa_foir_percent <= 50 and bsa_inward_bounces_6m == 0"
+        on_pass: APPROVE
+        on_fail: MANUAL_REVIEW
+        fail_reason: "Routed to Credit Underwriter CAM review due to borderline CIBIL (<720), FOIR (>50%), or minor bounce history."
+        pass_reason: "Strong CIBIL (>=720), disciplined FOIR (<=50%), and zero inward bounces."

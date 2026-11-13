@@ -1,0 +1,64 @@
+workflow_id: gst_vendor_onboarding
+version: "1.1.0"
+name: MSME & Enterprise Vendor GST Onboarding
+description: Verifies GSTIN registration and GSTR filing regularity via ScoreMe GSTN Analyzer and routes high-value contracts to procurement review.
+default_outcome: APPROVED
+
+input_schema:
+  entity_name:
+    type: string
+    required: true
+  gstin:
+    type: string
+    required: true
+  annual_turnover:
+    type: float
+    required: true
+    min_value: 0
+  contract_value:
+    type: float
+    required: true
+    min_value: 1000
+  msme_udyam_verified:
+    type: bool
+    required: false
+
+steps:
+  - id: gstn_verification_step
+    name: External GSTN Registry & Return Check
+    step_type: external_check
+    external_check:
+      id: query_gstn_analyzer
+      service: gstn_analyzer
+      input_fields: ["gstin"]
+      max_retries: 2
+      retry_backoff_ms: 20
+      on_failure: RETRY_PENDING
+
+  - id: vendor_policy_rules
+    name: GST Compliance & Financial Exposure Thresholds
+    step_type: rule_group
+    rules:
+      - id: active_gstin_mandatory
+        name: Active GSTIN Registration Check
+        category: mandatory
+        expression: "gst_active == True"
+        on_pass: NEXT
+        on_fail: REJECT
+        fail_reason: "GSTIN is cancelled, suspended, or invalid in GSTN records."
+
+      - id: turnover_to_contract_coverage
+        name: Annual Turnover Coverage (>= 2x Contract Value)
+        category: threshold
+        expression: "annual_turnover >= contract_value * 2"
+        on_pass: NEXT
+        on_fail: MANUAL_REVIEW
+        fail_reason: "Declared annual turnover is below 2x the proposed contract value."
+
+      - id: procurement_approval_limit
+        name: High-Value Contract Sign-Off Threshold
+        category: branch
+        expression: "contract_value <= 2500000"
+        on_pass: APPROVE
+        on_fail: MANUAL_REVIEW
+        fail_reason: "Contracts exceeding INR 25,00,000 require VP Procurement sign-off."
